@@ -1,17 +1,20 @@
-// File: src/contexts/AuthContext.jsx
+// File: src/context/AuthContext.jsx
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
   signOut, 
   onAuthStateChanged, 
-  signInWithEmailAndPassword 
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword // 🔥 Added for FoundryLogin registration
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../services/firebase'; 
 import { Loader2 } from 'lucide-react';
 
-const AuthContext = createContext();
+// 🔥 EXPORT ADDED: Required for the UI components to hook into the matrix
+export const AuthContext = createContext();
 
 export function useAuth() {
   return useContext(AuthContext);
@@ -28,7 +31,7 @@ export function AuthProvider({ children }) {
     try {
       const roleRef = doc(db, 'user_roles', user.uid);
       const roleSnap = await getDoc(roleRef);
-
+      
       let roleData = {
         email: user.email,
         isGlobalAdmin: false,
@@ -42,17 +45,16 @@ export function AuthProvider({ children }) {
         // If new user, create a blank investor profile
         await setDoc(roleRef, roleData);
       }
-
+      
       setUserRole(roleData);
 
       // 🏢 TENANT ROUTING: Determine their default silo
       if (roleData.isGlobalAdmin) {
-        setActiveTenant(roleData.lastActiveTenant || 'panda_africa'); // Admins default to Panda, but can switch
+        setActiveTenant(roleData.lastActiveTenant || 'panda_africa'); 
       } else {
         const assignedTenants = Object.keys(roleData.tenantRoles || {});
-        setActiveTenant(assignedTenants[0] || null); // Standard users lock to their first assigned tenant
+        setActiveTenant(assignedTenants[0] || null); 
       }
-
     } catch (error) {
       console.error("RBAC Integrity Error:", error);
     }
@@ -61,7 +63,6 @@ export function AuthProvider({ children }) {
   const switchTenant = async (newTenantId) => {
     if (userRole?.isGlobalAdmin) {
       setActiveTenant(newTenantId);
-      // Optional: Save preference to DB so it remembers next time they log in
       if (currentUser) {
         await setDoc(doc(db, 'user_roles', currentUser.uid), { lastActiveTenant: newTenantId }, { merge: true });
       }
@@ -72,6 +73,12 @@ export function AuthProvider({ children }) {
 
   const loginWithEmail = async (email, password) => {
     const result = await signInWithEmailAndPassword(auth, email, password);
+    await handleUserSession(result.user);
+  };
+
+  // 🔥 ADDED: Registration logic for the Foundry Front Door
+  const registerWithEmail = async (email, password) => {
+    const result = await createUserWithEmailAndPassword(auth, email, password);
     await handleUserSession(result.user);
   };
 
@@ -95,16 +102,19 @@ export function AuthProvider({ children }) {
       }
       setLoading(false);
     });
-
     return unsubscribe;
   }, []);
 
   const value = {
     currentUser,
     userRole,
+    userProfile: userRole, // 🔥 ALIAS ADDED: Bridges your logic with the new UI components seamlessly
     activeTenant,
+    setActiveTenant, // 🔥 ADDED: Allows FoundryHub to route tenants
+    setUserRole,     // 🔥 ADDED: Allows FoundryHub to set roles dynamically
     switchTenant,
     loginWithEmail,
+    registerWithEmail,
     loginWithGoogle,
     logout
   };
@@ -114,7 +124,7 @@ export function AuthProvider({ children }) {
       {loading ? (
         <div className="min-h-screen bg-black flex flex-col items-center justify-center font-black uppercase tracking-widest text-[#D4AF37]">
           <Loader2 size={64} className="mb-6 animate-spin text-[#D4AF37]" />
-          <p className="animate-pulse">Decrypting Matrix...</p>
+          <p className="animate-pulse">DECRYPTING MATRIX...</p>
         </div>
       ) : children}
     </AuthContext.Provider>
